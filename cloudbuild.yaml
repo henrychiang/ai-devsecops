@@ -1,0 +1,276 @@
+
+steps:
+#- name: ubuntu
+#- name: 'docker.io/centos/httpd'
+#  entrypoint: /bin/bash
+#  args:
+#  - -c
+#  - |
+#    echo "=START-TEST="
+#    echo "=MY-IP="
+#    echo
+#    curl http://ifconfig.me
+#    echo "=SQ-CONNECT-TEST="
+#    echo
+#    curl 10.140.0.2:9000|grep 'SonarQube'|wc -l
+#    echo "=HTTPD-CONNECT-TEST=\n"
+#    curl 10.140.0.2:8080|grep 'This page is used to test the proper operation of the HTTP server after it has been installed'|wc -l
+#    echo "=AI-SVC-CONNECT-TEST=\n"
+#    curl 10.140.0.11:11434
+#    echo "=END-TEST="
+
+- name: 'gcr.io/cloud-builders/git'
+  secretEnv: ['SSH_KEY_CI','SSH_KEY_CD']
+  entrypoint: 'bash'
+  args:
+  - -c
+  - |
+    echo "$$SSH_KEY_CI" >> /root/.ssh/id_rsa_ci
+    echo "$$SSH_KEY_CD" >> /root/.ssh/id_rsa_cd
+    chmod -R 600 /root/.ssh/id_rsa_ci
+    chmod -R 600 /root/.ssh/id_rsa_cd
+    cp known_hosts.github /root/.ssh/known_hosts
+
+    cat <<EOF > /root/.ssh/config
+    Host github.com-ci
+            Hostname github.com
+            IdentityFile=/root/.ssh/id_rsa_ci
+    Host github.com-cd
+            Hostname github.com
+            IdentityFile=/root/.ssh/id_rsa_cd
+    EOF
+    chmod 600 /root/.ssh/config
+    ls /root/.ssh
+    cat /root/.ssh/config
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Clone the repository
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: /bin/bash
+  args:
+    - '-c'
+    - |
+      #git clone --recurse-submodules git@github.com:henrychiang/go-opdev ~/go-opdev
+      #git clone --recurse-submodules git@github.com-ci:henrychiang/go-opdev ~/go-opdev
+      git clone --recurse-submodules git@github.com-ci:henrychiang/devsecaiops-ci ~/devsecaiops-ci
+      echo 'cd ~/devsecaiops-ci'
+      cd ~/devsecaiops-ci
+      TS=$(date +%Y%m%d_%H%M%S)
+      echo "now is $$TS"
+      #git checkout -b "dev-$$TS"
+      #git push origin "dev-$$TS"
+      git checkout -b "dev-$BUILD_ID"
+      git push origin "dev-$BUILD_ID"
+      chmod -R 777 /builder/home/devsecaiops-ci
+      # For Aider
+      chmod -R 777 /builder/home
+      chmod -R 777 /workspace
+      #chmod -R 777 /root
+      git config --global --add safe.directory /builder/home/devsecaiops-ci
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Generate a detailed vulnerability report without failing on vulnerabilities
+- name: 'aquasec/trivy:0.69.3'
+  entrypoint: 'sh'
+  args:
+    - '-c'
+    - |
+      # Generate a full report in table format for human review
+      echo "=TRIVY="
+      TS=$(date +%Y%m%d_%H%M%S)
+      echo "now is $$TS"
+      echo "buildid is $BUILD_ID"
+      #trivy fs --scanners vuln,secret,misconfig /builder/home/go-opdev --severity CRITICAL --format table -o /workspace/trivy-report."$BUILD_ID".txt
+      trivy fs --scanners vuln,secret,misconfig /builder/home/devsecaiops-ci --severity CRITICAL --format json -o /workspace/trivy-report."$BUILD_ID".json
+      cp /workspace/trivy-report."$BUILD_ID".json /builder/home/devsecaiops-ci
+
+# Step x: Run SonarScanner analysis
+- name: 'sonarsource/sonar-scanner-cli'
+  entrypoint: 'sh'
+  args:
+    - '-c'
+    - |
+      echo "=SQ="
+      echo "buildid is $BUILD_ID"
+      echo 'cd ~/devsecaiops-ci'
+      cd ~/devsecaiops-ci
+      echo 'sudo setenforce 0'
+      sudo setenforce 0
+      echo 'id'
+      id
+      sonar-scanner -Dsonar.host.url=http://10.140.0.2:9000 -Dsonar.login=f69d356589270b9ad49b5706dfdacc4be5919b34 -Dsonar.projectKey=cicd4ccy2go -Dsonar.sources=/builder/home/devsecaiops-ci
+      echo 'ls .scannerwork'
+      ls .scannerwork
+      cp .scannerwork/cicd4ccy2go*.pdf /workspace/sq-report."$BUILD_ID".pdf
+      curl -u "f69d356589270b9ad49b5706dfdacc4be5919b34:" "http://10.140.0.2:9000/api/issues/search?componentKeys=cicd4ccy2go&ps=500" -o sq-report."$BUILD_ID".json
+      cp sq-report."$BUILD_ID".json /workspace/sq-report."$BUILD_ID".json
+      #cp .scannerwork/cicd4ccy2go*.pdf gs://trivy4ccy/
+   #- '-Dsonar.host.url=http://10.140.0.2:9000'
+    #- '-Dsonar.login=f69d356589270b9ad49b5706dfdacc4be5919b34'
+    #- '-Dsonar.projectKey=cicd4ccy2go'
+    #- '-Dsonar.sources=.'
+
+- name: 'asia-east1-docker.pkg.dev/project-bf939e63-59b6-4338-992/cicd/aider:latest'
+  entrypoint: 'sh'
+  env:
+    - 'OLLAMA_API_BASE=http://10.140.0.11:11434'
+  args:
+    - '-c'
+    - |
+      echo "=AIDER="
+      pwd
+      #ls -a
+      cd ~/devsecaiops-ci
+      pwd
+      #git config --global --add safe.directory /builder/home/go-opdev
+      echo "=GIT_STATUS="
+      git status
+      ls -a
+      #CODEBASE_FILES=$(find * -type f|grep '.go$')
+      #chmod -R 777 /builder/home#Setting put above (gcr.io/cloud-builders/git);Otherwise error!!!
+      #aider --model ollama_chat/qwen2.5-coder:14b --message 'show me the current programming language' --yes
+      #aider --model ollama_chat/qwen2.5-coder:14b --message 'As a developer, please refactor the codebase by sq-report.$BUILD_ID.json' --yes --read 'sq-report.$BUILD_ID.json' --no-git
+      #aider --model ollama_chat/qwen2.5-coder:14b --edit-format whole --message 'As a developer, please refactor the codebase by sq-report.$BUILD_ID.json' --yes --read 'sq-report.$BUILD_ID.json' 
+      #find . -type f -name "*.go" | xargs aider \
+      #CRITICAL_COUNT_TRIVY=$(jq '[.Results[].Vulnerabilities | select(. != null)] | length' trivy-report.$BUILD_ID.json)
+      CRITICAL_COUNT_TRIVY=$(grep -c 'CRITICAL' trivy-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_TRIVY="
+      echo $$CRITICAL_COUNT_TRIVY
+      CRITICAL_COUNT_SQ=$(grep -c 'CRITICAL' sq-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_SQ="
+      echo $$CRITICAL_COUNT_SQ
+
+      #if [ "$$CRITICAL_COUNT_TRIVY" -eq 0 ] && [ "$$CRITICAL_COUNT_SQ" -eq 0 ]; then
+      if [ "$$CRITICAL_COUNT_TRIVY" -eq 0 ] && [ "$$CRITICAL_COUNT_SQ" -eq 1 ]; then
+        echo "No CRITICAL Vulnerabilities. Skipping step successfully."
+        exit 0
+      fi
+
+      aider --model ollama_chat/qwen2.5-coder:14b --read sq-report.$BUILD_ID.json --read trivy-report.$BUILD_ID.json --editor-edit-format whole --yes \
+            --message "As a developer, please refactor the codebase by sq-report.$BUILD_ID.json and trivy-report.$BUILD_ID.json"
+  allowFailure: true # Prevents the entire build from failing if this step errors out
+
+# Commit the repository
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: /bin/bash
+  args:
+    - '-c'
+    - |
+      echo 'cd ~/devsecaiops-ci'
+      cd ~/devsecaiops-ci
+
+      git config --global user.email "yoyolist@gmail.com"
+      git config --global user.name "henrychiang"
+
+      git add .
+      git commit -m "AI Refactor Commit!"
+      git push origin "dev-$BUILD_ID"
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: /bin/bash
+  args:
+    - '-c'
+    - |
+      echo "=BUILD="
+      cd /builder/home/devsecaiops-ci
+      ls
+
+      CRITICAL_COUNT_TRIVY=$(grep -c 'CRITICAL' trivy-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_TRIVY="
+      echo $$CRITICAL_COUNT_TRIVY
+      CRITICAL_COUNT_SQ=$(grep -c 'CRITICAL' sq-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_SQ="
+      echo $$CRITICAL_COUNT_SQ
+
+      if [ "$$CRITICAL_COUNT_TRIVY" -ne 0 ]; then
+        echo "Having CRITICAL Vulnerabilities. Skipping step successfully."
+        exit 0
+      fi
+      #if [ "$$CRITICAL_COUNT_SQ" -ne 0 ]; then
+      if [ "$$CRITICAL_COUNT_SQ" -gt 1 ]; then
+        echo "Having CRITICAL Vulnerabilities. Skipping step successfully."
+        exit 0
+      fi
+
+      docker build -t asia-east1-docker.pkg.dev/$PROJECT_ID/cicd/my-image:$BUILD_ID .
+      docker push asia-east1-docker.pkg.dev/$PROJECT_ID/cicd/my-image:$BUILD_ID
+  allowFailure: true # Prevents the entire build from failing if this step errors out
+
+# Clone & Commit the repository
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: /bin/bash
+  args:
+    - '-c'
+    - |
+      CRITICAL_COUNT_TRIVY=$(grep -c 'CRITICAL' trivy-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_TRIVY="
+      echo $$CRITICAL_COUNT_TRIVY
+      CRITICAL_COUNT_SQ=$(grep -c 'CRITICAL' sq-report.$BUILD_ID.json)
+      echo "=CRITICAL_COUNT_SQ="
+      echo $$CRITICAL_COUNT_SQ
+
+      if [ "$$CRITICAL_COUNT_TRIVY" -ne 0 ]; then
+        echo "Having CRITICAL Vulnerabilities. Skipping step successfully."
+        exit 0
+      fi
+      #if [ "$$CRITICAL_COUNT_SQ" -ne 0 ]; then
+      if [ "$$CRITICAL_COUNT_SQ" -gt 1 ]; then
+        echo "Having CRITICAL Vulnerabilities. Skipping step successfully."
+        exit 0
+      fi
+      
+      ls /root/.ssh
+      cat /root/.ssh/config
+
+      git clone --recurse-submodules git@github.com-cd:henrychiang/devsecaiops ~/devsecaiops
+      cd ~/devsecaiops
+      #Branch
+      git checkout -b "dev-$BUILD_ID"
+      git push origin "dev-$BUILD_ID"
+      chmod -R 777 /builder/home/devsecaiops
+      git config --global --add safe.directory /builder/home/devsecaiops
+
+      sed -i '/containers:/,/image:/ s|image:.*|image: asia-east1-docker.pkg.dev/$PROJECT_ID/cicd/my-image:$BUILD_ID|' pod-httpd.yaml
+      echo "Updated pod-httpd.yaml:"
+      cat pod-httpd.yaml
+      
+      git config --global user.email "yoyolist@gmail.com"
+      git config --global user.name "henrychiang"
+
+      git add .
+      git commit -m "Cloudbuild Commit!"
+      git push origin "dev-$BUILD_ID"
+  volumes:
+  - name: 'ssh'
+    path: /root/.ssh
+
+# Save the scan reports as artifacts
+artifacts:
+  objects:
+    location: 'gs://trivy4ccy/'
+    paths:
+      - '/workspace/trivy-report.$BUILD_ID.json'
+      - '/workspace/sq-report.$BUILD_ID.pdf'
+      - '/workspace/sq-report."$BUILD_ID".json'
+
+availableSecrets:
+  secretManager:
+  #- versionName: projects/PROJECT_ID/secrets/SECRET_NAME/versions/latest
+  #- versionName: projects/434160571549/secrets/cloud-build-test-key/versions/1
+  - versionName: projects/434160571549/secrets/cloud-build-test-key-gohttp/versions/1
+    env: 'SSH_KEY_CI'
+  - versionName: projects/434160571549/secrets/cloud-build-test-key-key_devsecaiops/versions/1
+    env: 'SSH_KEY_CD'
+
+options:
+  pool:
+    name: 'projects/434160571549/locations/asia-east1/workerPools/cicdpoc'
+
