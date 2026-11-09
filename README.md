@@ -1,5 +1,8 @@
 # AI-DevSecOps
-A CICD integration implementations with AI, Security and Quality validation mechanisms.
+A CICD integration implementations with AI, Security and Quality validation mechanisms
+
+## Architecture
+![Placeholder](https://github.com/henrychiang/ai-devsecops/blob/main/arch.gif?raw=true)
 
 ## Component
 - [x] GitHub
@@ -13,8 +16,7 @@ A CICD integration implementations with AI, Security and Quality validation mech
 - [x] Registry
 - [x] GKE
 
-## Architecture
-![Placeholder](https://github.com/henrychiang/ai-devsecops/blob/main/arch.gif?raw=true)
+
 
 
 
