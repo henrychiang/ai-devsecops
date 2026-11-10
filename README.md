@@ -19,6 +19,7 @@ A CICD integration implementations with AI, Security and Quality validation mech
 - [x] Monitoring - 'nvidia-smi' to monitor GPU usage
 - [x] Registry - GCP Artifact Registry to store docker images
 - [x] GKE - Kubernetes service to host applications
+- [x] GCS - GCP CloudStorage to store security reports
 
 
 
