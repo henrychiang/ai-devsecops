@@ -7,9 +7,9 @@ A CICD integration implementations with AI, Security and Quality validation mech
 ## Component
 
 - [x] GitHub
-- -Repository for source-codes (cf, https://github.com/henrychiang/go-opdev)
-- -Repository for source-codes (cf, https://github.com/henrychiang/devsecaiops-ci)
-- -Repository for deploy (GitOps) artifacts (cf, https://github.com/henrychiang/devsecaiops-cd)
+- Repository for source-codes (cf, https://github.com/henrychiang/go-opdev)
+- Repository for source-codes (cf, https://github.com/henrychiang/devsecaiops-ci)
+- Repository for deploy (GitOps) artifacts (cf, https://github.com/henrychiang/devsecaiops-cd)
 - [x] CloudBuild - GCP CICD engine to connect end-to-end steps
 - [x] SonarQube - Tools to check codes' qualities
 - [x] Trivy - Tools to check dependencies' vulnerabilities
